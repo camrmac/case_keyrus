@@ -1,0 +1,274 @@
+# API Configuration
+api:
+  ibge:
+    enabled: false  # APIs do IBGE estão temporariamente indisponíveis
+    base_url: "https://servicodados.ibge.gov.br/api/v3"
+    endpoints:
+      populacao:
+        id: 6579
+        descricao: "População residente enviada ao Tribunal de Contas da União"
+        periodo: "2024"
+        nivel_territorial: "6"
+      pib:
+        id: 5938
+        descricao: "Produto Interno Bruto dos Municípios"
+        periodo: "2021"
+        nivel_territorial: "6"
+  timeout: 30
+  retry:
+    attempts: 3
+    backoff_factor: 2
+    max_delay: 60
+  
+  # Banco Central API Configuration
+  banco_central:
+    base_url: "https://api.bcb.gov.br"
+    enabled: true
+    series:
+      # Inflação e Preços
+      ipca_mensal:
+        codigo: 433
+        descricao: "IPCA - Índice Nacional de Preços ao Consumidor Amplo (Mensal)"
+      ipca_12m:
+        codigo: 13522
+        descricao: "IPCA - Acumulado 12 meses"
+      ipca_15:
+        codigo: 10764
+        descricao: "IPCA-15 - Índice Nacional de Preços ao Consumidor Amplo 15"
+      inpc:
+        codigo: 188
+        descricao: "INPC - Índice Nacional de Preços ao Consumidor"
+      igpm:
+        codigo: 189
+        descricao: "IGP-M - Índice Geral de Preços do Mercado"
+      igpdi:
+        codigo: 190
+        descricao: "IGP-DI - Índice Geral de Preços - Disponibilidade Interna"
+      # Produto e Atividade
+      pib_mensal:
+        codigo: 4380
+        descricao: "PIB - Produto Interno Bruto (Mensal)"
+      pib_acumulado_12m:
+        codigo: 4381
+        descricao: "PIB - Acumulado 12 meses"
+      # Mercado de Trabalho
+      desemprego:
+        codigo: 24369
+        descricao: "Taxa de Desocupação (Desemprego)"
+      # Taxas de Juros
+      selic:
+        codigo: 432
+        descricao: "Taxa Selic - Taxa básica de juros"
+      cdi:
+        codigo: 12
+        descricao: "Taxa CDI - Certificado de Depósito Interbancário"
+      # Câmbio
+      dolar:
+        codigo: 1
+        descricao: "Taxa de câmbio - Dólar americano (venda)"
+      euro:
+        codigo: 21619
+        descricao: "Taxa de câmbio - Euro (venda)"
+      # Política Monetária
+      reservas_internacionais:
+        codigo: 13621
+        descricao: "Reservas Internacionais - Total"
+      base_monetaria:
+        codigo: 1787
+        descricao: "Base Monetária - Total"
+      meios_pagamento:
+        codigo: 1788
+        descricao: "Meios de Pagamento - M1"
+
+# Azure Data Lake Configuration
+datalake:
+  base_path: "abfss://datalake@${AZURE_STORAGE_ACCOUNT_NAME}.dfs.core.windows.net"
+  layers:
+    bronze:
+      path: "bronze"
+      format: "parquet"
+      mode: "overwrite"
+      partitions: ["ano", "fonte"]
+    silver:
+      path: "silver"
+      format: "parquet"
+      mode: "overwrite"
+      partitions: ["ano"]
+    gold:
+      path: "gold"
+      format: "parquet"
+      mode: "overwrite"
+      partitions: []
+  
+  # Retention policy (days)
+  retention:
+    bronze: 90
+    silver: 365
+    gold: -1  # Keep forever
+
+# Spark Configuration for Azure
+spark:
+  app_name: "Keyrus_DataLake_Pipeline_Azure"
+  master: "local[*]" 
+  config:
+    # Configurações básicas
+    spark.sql.shuffle.partitions: 200
+    spark.sql.adaptive.enabled: true
+    spark.sql.adaptive.coalescePartitions.enabled: true
+    spark.sql.parquet.compression.codec: "snappy"
+    spark.sql.sources.partitionOverwriteMode: "dynamic"
+    spark.driver.memory: "4g"
+    spark.executor.memory: "4g"
+    spark.ui.enabled: false
+    spark.driver.maxResultSize: "2g"
+  
+    # spark.hadoop.fs.azure.account.auth.type: OAuth, SharedKey, ou SAS
+    # spark.hadoop.fs.azure.account.key.<storage-account>.dfs.core.windows.net: <key>
+
+# Data Quality Configuration
+quality:
+  enabled: true
+  checks:
+    - name: "schema_validation"
+      enabled: true
+    - name: "null_check"
+      enabled: true
+      critical_columns: ["codigo_municipio", "ano", "valor"]
+    - name: "range_validation"
+      enabled: true
+      rules:
+        populacao: {min: 0, max: 20000000}
+        pib: {min: 0, max: 1000000000000}
+        ano: {min: 2000, max: 2030}
+    - name: "duplicate_check"
+      enabled: true
+      key_columns: ["codigo_municipio", "ano"]
+  threshold:
+    error_rate: 0.05 
+    completeness: 0.95
+
+# Transformation Rules
+transformation:
+  silver:
+    column_mapping:
+      "Municípios": "municipio"
+      "Valor": "valor"
+      "Ano": "ano"
+    data_types:
+      codigo_municipio: "string"
+      valor: "double"
+      ano: "integer"
+    cleaning:
+      remove_nulls: ["codigo_municipio", "ano"]
+      trim_strings: true
+      standardize_names: true
+  
+  gold:
+    aggregations:
+      municipio: ["sum", "avg", "count"]
+      uf: ["sum", "avg", "count"]
+      brasil: ["sum", "avg"]
+    metrics:
+      - pib_per_capita
+      - yoy_growth
+      - share_uf
+      - share_brasil
+      - rank_uf
+      - rank_brasil
+
+# Indicators Configuration
+indicators:
+  municipio:
+    metricas:
+      - populacao
+      - pib
+      - pib_per_capita
+      - yoy_pib
+      - yoy_populacao
+      - share_pib_uf
+      - share_pib_brasil
+      - rank_pib_uf
+      - rank_pib_brasil
+  uf:
+    metricas:
+      - populacao_total
+      - pib_total
+      - pib_per_capita_medio
+      - yoy_pib
+      - yoy_populacao
+      - share_pib_brasil
+      - rank_pib_brasil
+  brasil:
+    metricas:
+      - populacao_total
+      - pib_total
+      - pib_per_capita
+      - yoy_pib
+      - yoy_populacao
+      - ipca_mensal
+      - ipca_12m
+      - desemprego
+      - igpm
+      - igpdi
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file:
+    enabled: true
+    path: "./logs"
+    filename: "pipeline_azure.log"
+    max_bytes: 10485760  
+    backup_count: 5
+  console:
+    enabled: true
+
+# Monitoring & Alerts
+monitoring:
+  enabled: true
+  metrics:
+    - execution_time
+    - records_processed
+    - errors_count
+    - data_quality_score
+  alerts:
+    email:
+      enabled: false
+      recipients: []
+    slack:
+      enabled: false
+      webhook_url: ""
+
+# Database Configuration
+database:
+  enabled: true  
+  type: "azuresql"  
+  workspace: ""  
+  sql_pool: ""  
+  server: "datalake-keyrus" 
+  database: "datalake-keyrus"  
+  schema: "dbo"  
+  port: 1433  
+  user: "${DB_USER}"  
+  password: "${DB_PASSWORD}" 
+  write_mode: "overwrite"  
+  jdbc_jar: "" 
+
+# Azure Configuration
+azure:
+  enabled: true
+  storage:
+    account_name: "${AZURE_STORAGE_ACCOUNT_NAME}"
+    container: "${AZURE_CONTAINER_NAME}"
+    auth_method: "account_key"
+  databricks:
+    workspace_url: "${DATABRICKS_HOST}"
+    cluster_id: ""
+  synapse:
+    workspace_name: ""
+    sql_pool: ""
+  adf:
+    factory_name: ""
+    resource_group: ""
+
