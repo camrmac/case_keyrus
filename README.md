@@ -49,7 +49,7 @@ Implementar um data lake com ingestão via API (IBGE + Banco Central), modelagem
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      AZURE CLOUD ARCHITECTURE                    │
+│                      AZURE CLOUD                                │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  ┌──────────────┐        ┌─────────────────────────────────┐  │
